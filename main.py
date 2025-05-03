@@ -1,9 +1,12 @@
 from db.database import init_db
-from util.encryption import encrypt_password, decrypt_password, hash_password
-from util.validation import validate_password_strength
+from util.encryption import encrypt_password, decrypt_password
+from util.validation import validate_password_strength, generate_strong_password
+from util.otp import generate_otp, send_otp
+from util.hash_util import hash_password
 
 import sqlite3
 
+# Registering a master account
 def register_master_account():
     email = input("Enter your email: ")
     password = input("Create a master password: ")
@@ -30,6 +33,7 @@ def register_master_account():
     except sqlite3.IntegrityError:
         print("An account with this email already exists.")
 
+# Logging in
 def login():
     email = input("Enter your email: ")
     password = input("Enter your master password: ")
@@ -43,18 +47,24 @@ def login():
 
     if result:
         print("Login successful! Welcome.")
-        return result[0]  # return user_id
+        return result[0], password  # return user_id and master_password
     else:
         print("Invalid email or password.")
         return None
-    
 
-#Storing passwords in a vault
-def store_password(user_id):
+# Storing passwords in the vault
+def store_password(user_id, master_password):
     website = input("Enter website name: ")
     username = input("Enter username: ")
-    password = input("Enter password for the site: ")
-    master_password = input("Enter your master password again to encrypt this password: ")
+
+    # Ask user if they want to generate a password
+    use_generator = input("Do you want to generate a strong password? (y/n): ")
+
+    if use_generator.lower() == 'y':
+        password = generate_strong_password()
+        print(f"Generated Password: {password}")
+    else:
+        password = input("Enter password for the site: ")
 
     encrypted_password = encrypt_password(password, master_password)
 
@@ -68,30 +78,44 @@ def store_password(user_id):
     print("Password stored successfully!")
 
 
-
-
-#Retrieving passwords from the vault
-def view_passwords(user_id):
-    master_password = input("Enter your master password to view passwords: ")
-
+# Retrieving passwords from the vault
+def view_passwords(user_id, master_password):
     conn = sqlite3.connect("passwords.db")
     cursor = conn.cursor()
+    cursor.execute("SELECT email FROM users WHERE id = ?", (user_id,))
+    user_email = cursor.fetchone()[0]
+
     cursor.execute("SELECT website, username, password FROM vault WHERE user_id = ?", (user_id,))
     results = cursor.fetchall()
+
+    if not results:
+        print("No passwords stored.")
+        return
+
+    # Generate and send OTP
+    otp = generate_otp()
+    send_otp(user_email, otp)
+
+    user_otp = input("Enter the OTP sent to your email: ")
+
+    if user_otp != otp:
+        print("Invalid OTP. Access denied.")
+        return
+
+    # OTP Verified → show passwords
+    for row in results:
+        website, username, encrypted_password = row
+        try:
+            decrypted_password = decrypt_password(encrypted_password, master_password)
+            print(f"Website: {website}\nUsername: {username}\nPassword: {decrypted_password}\n{'-'*20}")
+        except Exception as e:
+            print(f"Website: {website}\nUsername: {username}\nPassword: Cannot decrypt (Wrong master password)\n{'-'*20}")
+
     conn.close()
 
-    if results:
-        for row in results:
-            website, username, encrypted_password = row
-            try:
-                decrypted_password = decrypt_password(encrypted_password, master_password)
-                print(f"Website: {website}\nUsername: {username}\nPassword: {decrypted_password}\n{'-'*20}")
-            except Exception as e:
-                print(f"Website: {website}\nUsername: {username}\nPassword: Cannot decrypt (Wrong master password)\n{'-'*20}")
-    else:
-        print("No passwords stored.")
-
-
+# --------------------------
+# Main app flow
+# --------------------------
 
 if __name__ == "__main__":
     init_db()
@@ -103,24 +127,21 @@ if __name__ == "__main__":
     if choice == "1":
         register_master_account()
     elif choice == "2":
-        user_id = login()
-    if user_id:
-        while True:
-            print("\n1. Store a new password")
-            print("2. View stored passwords")
-            print("3. Exit")
-            option = input("Choose an option: ")
+        login_result = login()
+        if login_result:
+            user_id, master_password = login_result
 
-            if option == "1":
-                store_password(user_id)
-            elif option == "2":
-                view_passwords(user_id)
-            elif option == "3":
-                break
-            else:
-                print("Invalid option. Try again.")
+            while True:
+                print("\n1. Store a new password")
+                print("2. View stored passwords")
+                print("3. Exit")
+                option = input("Choose an option: ")
 
-
-
-
-
+                if option == "1":
+                    store_password(user_id, master_password)
+                elif option == "2":
+                    view_passwords(user_id, master_password)
+                elif option == "3":
+                    break
+                else:
+                    print("Invalid option. Try again.")

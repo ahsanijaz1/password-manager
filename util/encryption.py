@@ -3,8 +3,10 @@ import hashlib
 import base64
 
 def generate_key(master_password):
-    digest = hashlib.sha256(master_password.encode()).digest()
+    password_clean = master_password.strip()  # <-- this removes spaces and newlines
+    digest = hashlib.sha256(password_clean.encode()).digest()
     return base64.urlsafe_b64encode(digest)
+
 
 def encrypt_password(password, master_password):
     key = generate_key(master_password)
